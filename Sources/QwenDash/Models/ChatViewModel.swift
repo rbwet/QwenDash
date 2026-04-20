@@ -67,12 +67,14 @@ final class ChatViewModel: ObservableObject {
         pingTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.refreshConnection() }
         }
-        // Mirror VoiceSession state changes onto the main actor.
+        // Mirror VoiceSession state changes onto the main actor via an
+        // AsyncStream so we don't have to store a closure that captures
+        // `self` inside the actor (which tripped Swift 6 Sendable checks).
         Task { [weak self] in
-            await self?.voice.setStateObserver { newState in
-                Task { @MainActor [weak self] in
-                    self?.voiceState = newState
-                }
+            guard let self = self else { return }
+            let stream = await self.voice.stateStream()
+            for await newState in stream {
+                self.voiceState = newState
             }
         }
     }
@@ -190,9 +192,11 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// Pre-load the Whisper model so the first voice interaction is snappy.
-    /// Fire-and-forget; safe to call at startup.
+    /// Fire-and-forget; any failure here is deliberately silent so we don't
+    /// spam an offline user at launch — errors resurface the first time
+    /// they actually try to use voice.
     func warmVoiceModel() {
-        Task { await voice.prepare() }
+        Task { await voice.prewarm() }
     }
 
     // MARK: - Private

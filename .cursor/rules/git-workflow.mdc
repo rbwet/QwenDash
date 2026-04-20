@@ -58,7 +58,22 @@ Use `--no-ff` on the merge so the feature's history is preserved as a visible br
 
 ## Releasing to main
 
-`main` is updated only when the user explicitly asks for a release. The release flow is `develop → main` via a fast-forward or a merge commit — never from a feature branch directly.
+`main` **only moves when `develop` has been pushed and has absorbed the change first.** Never merge a feature branch into `main` directly, never cherry-pick a feature commit onto `main`, and never push to `main` ahead of `develop`.
+
+The release flow is always:
+
+```bash
+# Preconditions: feature work is already merged into develop AND pushed.
+git checkout develop && git pull
+# Confirm origin/develop contains what we want on main. If it doesn't, stop.
+
+git checkout main && git pull
+git merge --no-ff develop -m "Release: merge develop into main"
+git push
+git checkout develop   # leave the working tree back on develop
+```
+
+If `origin/develop` isn't ahead of `origin/main`, there is nothing to release — do not invent a release. `main` is only ever a subset of what's already on `develop`.
 
 ## Hard rules
 
@@ -67,6 +82,7 @@ Use `--no-ff` on the merge so the feature's history is preserved as a visible br
 - **Never** delete a feature branch until the merge is confirmed on `origin/develop`.
 - **Never** skip `git pull` before branching off `develop` or merging into it.
 - **Never** use `git commit --no-verify` or `git push --force` unless the user explicitly asks for it.
+- **Never** push `main` ahead of `develop`. `main` must always be a merge target *from* `develop`, never a shortcut around it.
 
 ## Quick reference
 

@@ -67,6 +67,7 @@ struct GlassPanel<Content: View>: View {
                         ),
                         lineWidth: 0.8
                     )
+                    .allowsHitTesting(false)
             }
             .shadow(color: tint.opacity(0.18), radius: 22, x: 0, y: 8)
     }

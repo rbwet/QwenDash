@@ -43,6 +43,7 @@ struct InputBar: View {
                         focused ? Theme.neonCyan.opacity(0.7) : Color.white.opacity(0.12),
                         lineWidth: focused ? 1.0 : 0.7
                     )
+                    .allowsHitTesting(false)
             }
             .shadow(color: Theme.neonCyan.opacity(focused ? 0.30 : 0.0),
                     radius: focused ? 12 : 0)

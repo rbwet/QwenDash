@@ -23,6 +23,17 @@ final class ChatViewModel: ObservableObject {
     @Published var tokensThisTurn: Int = 0
     @Published var tokensPerSecond: Double = 0
 
+    /// Rolling average of per-token probabilities reported by the backend
+    /// (when logprobs are available). 0...1; nil when the backend doesn't
+    /// provide any confidence data for this turn.
+    @Published var avgConfidence: Double? = nil
+
+    /// Top-k alternative tokens at the most recent step, with probabilities.
+    /// Not rendered yet but exposed for future visualisations.
+    @Published var lastAlternatives: [(token: String, probability: Double)] = []
+
+    private var confidenceSamples: [Double] = []
+
     // Synapse graph state (driven by tokenization + streaming).
     // Intentionally NOT @Published: SynapseMapView reads it from inside a
     // TimelineView(.animation) that already redraws every frame, so marking
@@ -90,6 +101,9 @@ final class ChatViewModel: ObservableObject {
         isStreaming = true
         tokensThisTurn = 0
         tokensPerSecond = 0
+        avgConfidence = nil
+        lastAlternatives = []
+        confidenceSamples.removeAll()
         streamStart = Date()
 
         streamTask = Task { @MainActor [weak self] in
@@ -117,17 +131,32 @@ final class ChatViewModel: ObservableObject {
 
     // MARK: - Private
 
-    private func applyDelta(_ delta: String, to id: UUID) {
+    private func applyDelta(_ delta: TokenDelta, to id: UUID) {
         guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[idx].content += delta
+        messages[idx].content += delta.content
 
         // Update stats
-        tokensThisTurn += estimateTokens(in: delta)
+        tokensThisTurn += estimateTokens(in: delta.content)
         let elapsed = max(Date().timeIntervalSince(streamStart), 0.001)
         tokensPerSecond = Double(tokensThisTurn) / elapsed
 
-        // Feed the graph: fire a pulse from the hidden cluster to a new output node.
-        graph.ingestAssistantToken(delta)
+        if let p = delta.confidence {
+            confidenceSamples.append(p)
+            // Keep the rolling window bounded so older tokens don't dominate
+            // once a long generation has been running.
+            if confidenceSamples.count > 128 {
+                confidenceSamples.removeFirst(confidenceSamples.count - 128)
+            }
+            avgConfidence = confidenceSamples.reduce(0, +) / Double(confidenceSamples.count)
+        }
+        if !delta.alternatives.isEmpty {
+            lastAlternatives = delta.alternatives
+        }
+
+        // Feed the graph: fire a pulse from the hidden cluster to a new output
+        // node. When the backend supplied logprobs, the node's glow + pulse
+        // intensity track the model's confidence for that token.
+        graph.ingestAssistantToken(delta.content, confidence: delta.confidence)
     }
 
     private func finishStreaming(id: UUID, failed: Bool = false) {

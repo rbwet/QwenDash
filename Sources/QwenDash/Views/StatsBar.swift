@@ -49,6 +49,10 @@ struct StatsBar: View {
             stat(label: "TOK/S",
                  value: vm.isStreaming ? String(format: "%.1f", vm.tokensPerSecond) : "—",
                  color: Theme.neonMagenta)
+
+            stat(label: "CONF",
+                 value: vm.avgConfidence.map { String(format: "%.0f%%", $0 * 100) } ?? "—",
+                 color: confidenceColor(vm.avgConfidence))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -77,5 +81,14 @@ struct StatsBar: View {
 
     private func truncated(_ s: String, _ n: Int) -> String {
         s.count <= n ? s : "…" + s.suffix(n - 1)
+    }
+
+    /// Green-ish when the model is speaking confidently, amber when it's
+    /// hedging between candidates. Muted grey when we have no signal yet.
+    private func confidenceColor(_ p: Double?) -> Color {
+        guard let p = p else { return Theme.textMuted }
+        if p >= 0.6 { return Theme.neonGreen }
+        if p >= 0.3 { return Theme.neonCyan }
+        return Theme.neonAmber
     }
 }

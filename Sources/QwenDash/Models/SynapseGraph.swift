@@ -183,7 +183,13 @@ struct SynapseGraph {
 
     /// As each streaming delta arrives, drop a new output node and fire a pulse
     /// from a random hidden node to it.
-    mutating func ingestAssistantToken(_ delta: String) {
+    ///
+    /// - Parameter confidence: token probability in 0...1 reported by the
+    ///   backend via `logprobs`. When present it drives the new node's glow
+    ///   and its incoming pulse intensity, so confident tokens appear bright
+    ///   and uncertain ones fade. When nil, behaviour falls back to the old
+    ///   purely-random intensity range.
+    mutating func ingestAssistantToken(_ delta: String, confidence: Double? = nil) {
         // Cap output column so it never overflows visually.
         let maxOutputs = 16
         if outputNodeIDs.count >= maxOutputs {
@@ -224,6 +230,13 @@ struct SynapseGraph {
         nodes.append(node)
         outputNodeIDs.append(node.id)
 
+        // Map the backend's confidence (0...1) onto a visual intensity. We
+        // lift the floor to 0.3 so even low-confidence tokens stay visible —
+        // a probability of 0.05 is still a real token worth showing.
+        let conf = confidence.map { max(0.0, min(1.0, $0)) }
+        let intensityBase: Double = conf.map { 0.3 + 0.7 * $0 } ?? Double.random(in: 0.8...1.0)
+        let activationBase: Double = conf.map { 0.35 + 0.65 * $0 } ?? 1.0
+
         // Fire 2–3 pulses from random hidden nodes to this new output.
         let incoming = Int.random(in: 2...3)
         for _ in 0..<incoming {
@@ -235,13 +248,13 @@ struct SynapseGraph {
                 progress: 0,
                 speed: .random(in: 0.8...1.4),
                 color: Theme.neonMagenta,
-                intensity: .random(in: 0.8...1.0)
+                intensity: intensityBase * Double.random(in: 0.9...1.0)
             ))
             if let i = nodes.firstIndex(where: { $0.id == from }) {
                 nodes[i].activation = max(nodes[i].activation, 0.9)
             }
         }
-        activate(nodeID: node.id, to: 1.0)
+        activate(nodeID: node.id, to: activationBase)
 
         // Additional hidden chatter per token.
         for _ in 0..<4 {

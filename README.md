@@ -18,8 +18,9 @@ QwenDash is pure SwiftUI, talks to LM Studio's OpenAI-compatible endpoint over s
 
 - **Native SwiftUI app.** No Electron, no browser, no 300MB of Chromium. Launches instantly.
 - **Synapse map.** Your query tokens appear as cyan nodes on the left and fire pulses into a drifting cluster of "hidden" nodes in the middle. As the model streams back, magenta nodes pop in on the right, each one trailing a pulse from the cluster. Edges glow, things cross-chatter, the cluster looks busy.
+- **Real token confidence.** QwenDash asks LM Studio for per-token `logprobs` and maps the resulting probability straight onto each output node's glow. Tokens the model picked decisively come in bright; tokens it hedged on come in dim. The top bar shows a rolling `CONF` percentage averaged across the generation.
 - **Streaming chat.** Token-by-token output with a proper stop button. Cancel mid-thought, clear the conversation, start over.
-- **Live stats bar.** Connection state, model id, request latency, tokens/sec.
+- **Live stats bar.** Connection state, model id, request latency, tokens/sec, average token confidence.
 - **Cyberpunk-glass look.** Dark backdrop, radial neon glows, ultra-thin material panels, monospaced labels. Not subtle.
 
 ## Requirements
@@ -122,13 +123,13 @@ Create a fresh Xcode "macOS App" project and drop everything under `Sources/Qwen
 
 ## A note on the "synapse map"
 
-It's **not** a real activation trace. I'm not hooking into Qwen's internals to sample attention weights or hidden states. It's a stylised representation driven by:
+It's **not** a real activation trace. I'm not hooking into Qwen's internals to sample attention weights or hidden states — those aren't exposed by LM Studio's HTTP API.
 
-1. The tokens you send (split crudely on whitespace/punctuation).
-2. The deltas streamed back from LM Studio.
-3. A bit of randomness and decay to keep things breathing.
+What *is* real: the per-token confidence signal. When you send a query, QwenDash asks the server for `logprobs` along with each token. Every time a new output node lights up, its glow and incoming pulse intensity are scaled by the probability the model assigned to that token. A confident "the" comes in at full brightness; a hedged token where the top-5 candidates are all around 20% comes in noticeably dimmer.
 
-If someone wants to wire it up to actual telemetry from a running model, the graph API in `SynapseGraph.swift` is small and approachable — `ingestUserQuery`, `ingestAssistantToken`, and a `tick(dt:)` pump. PRs welcome.
+The hidden-cluster chatter and the positions of the nodes are still stylised — those are decorative. But the intensity of the output column is driven by an actual value the model produced. The `CONF` number in the top bar is the rolling average of those probabilities across the current generation.
+
+If someone wants to go further — expert-routing for MoE models, or actual hidden-state telemetry from an MLX inference loop — the graph API in `SynapseGraph.swift` is small and approachable: `ingestUserQuery`, `ingestAssistantToken(_:confidence:)`, and a `tick(dt:)` pump. PRs welcome.
 
 ## License
 

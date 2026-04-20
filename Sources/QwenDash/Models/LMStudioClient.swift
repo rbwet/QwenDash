@@ -1,5 +1,15 @@
 import Foundation
 
+/// One streaming delta from the server: a chunk of text plus (optionally) the
+/// per-token confidence data OpenAI-compatible endpoints emit when `logprobs`
+/// is requested. `confidence` is already converted from a natural log-prob
+/// into a 0...1 probability for the chosen token.
+struct TokenDelta {
+    let content: String
+    let confidence: Double?
+    let alternatives: [(token: String, probability: Double)]
+}
+
 /// Minimal streaming client for LM Studio's OpenAI-compatible endpoint.
 /// LM Studio serves at http://localhost:1234/v1 by default when the local server is enabled.
 actor LMStudioClient {
@@ -8,6 +18,10 @@ actor LMStudioClient {
         var model: String = "local-model"          // overridden by /v1/models if available
         var temperature: Double = 0.7
         var maxTokens: Int = 2048
+        /// Ask the server for per-token log-probabilities so we can drive the
+        /// synapse map with the model's own confidence signal.
+        var requestLogprobs: Bool = true
+        var topLogprobs: Int = 5
     }
 
     enum ClientError: LocalizedError {
@@ -61,9 +75,10 @@ actor LMStudioClient {
 
     // MARK: - Streaming chat
 
-    /// Streams assistant content tokens for the given message history.
-    /// Yields one string per SSE `delta.content` event.
-    func streamChat(messages: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
+    /// Streams assistant deltas for the given message history. Each yielded
+    /// value bundles the text chunk with the model's own confidence data
+    /// (when the backend supports `logprobs`).
+    func streamChat(messages: [ChatMessage]) -> AsyncThrowingStream<TokenDelta, Error> {
         let cfg = self.config
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -74,7 +89,7 @@ actor LMStudioClient {
                     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
 
-                    let body: [String: Any] = [
+                    var body: [String: Any] = [
                         "model": cfg.model,
                         "stream": true,
                         "temperature": cfg.temperature,
@@ -83,6 +98,10 @@ actor LMStudioClient {
                             ["role": $0.role.rawValue, "content": $0.content]
                         }
                     ]
+                    if cfg.requestLogprobs {
+                        body["logprobs"] = true
+                        body["top_logprobs"] = cfg.topLogprobs
+                    }
                     req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
                     let (bytes, resp) = try await URLSession.shared.bytes(for: req)
@@ -110,17 +129,25 @@ actor LMStudioClient {
                               let first = choices.first
                         else { continue }
 
-                        // OpenAI streams chunks in either "delta":{"content":...}
-                        // or a final message — both are handled.
+                        // Pull text out of either the streaming `delta` or the
+                        // terminal `message` shape — both are valid OpenAI forms.
+                        let content: String
                         if let delta = first["delta"] as? [String: Any],
-                           let content = delta["content"] as? String,
-                           !content.isEmpty {
-                            continuation.yield(content)
+                           let c = delta["content"] as? String, !c.isEmpty {
+                            content = c
                         } else if let message = first["message"] as? [String: Any],
-                                  let content = message["content"] as? String,
-                                  !content.isEmpty {
-                            continuation.yield(content)
+                                  let c = message["content"] as? String, !c.isEmpty {
+                            content = c
+                        } else {
+                            continue
                         }
+
+                        let (confidence, alts) = Self.parseLogprobs(first)
+                        continuation.yield(TokenDelta(
+                            content: content,
+                            confidence: confidence,
+                            alternatives: alts
+                        ))
                     }
                     continuation.finish()
                 } catch let urlErr as URLError where urlErr.code == .cannotConnectToHost
@@ -133,5 +160,42 @@ actor LMStudioClient {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    // MARK: - Logprob parsing
+
+    /// A delta may contain 0, 1, or many tokens' worth of logprob data. We
+    /// average their probabilities into a single confidence number (weighting
+    /// each token equally) and surface the alternatives for the LAST token —
+    /// the one most relevant to the most-recent node we're about to draw.
+    private static func parseLogprobs(
+        _ choice: [String: Any]
+    ) -> (Double?, [(String, Double)]) {
+        guard let lp = choice["logprobs"] as? [String: Any],
+              let content = lp["content"] as? [[String: Any]],
+              !content.isEmpty
+        else { return (nil, []) }
+
+        var probs: [Double] = []
+        for entry in content {
+            if let v = entry["logprob"] as? Double {
+                probs.append(exp(v))
+            }
+        }
+        let avg: Double? = probs.isEmpty
+            ? nil
+            : probs.reduce(0, +) / Double(probs.count)
+
+        var alts: [(String, Double)] = []
+        if let last = content.last,
+           let top = last["top_logprobs"] as? [[String: Any]] {
+            for t in top {
+                if let tok = t["token"] as? String,
+                   let v = t["logprob"] as? Double {
+                    alts.append((tok, exp(v)))
+                }
+            }
+        }
+        return (avg, alts)
     }
 }

@@ -34,6 +34,18 @@ final class ChatViewModel: ObservableObject {
 
     private var confidenceSamples: [Double] = []
 
+    // MARK: - Voice
+
+    /// Current state of the voice pipeline, mirrored onto the main actor
+    /// so SwiftUI can observe it.
+    @Published var voiceState: VoiceSession.State = .idle
+
+    /// When true, the response for a voice query is spoken aloud as it
+    /// streams. Flipped on for every voice-initiated turn.
+    private var speakAssistantReply: Bool = false
+
+    private let voice = VoiceSession()
+
     // Synapse graph state (driven by tokenization + streaming).
     // Intentionally NOT @Published: SynapseMapView reads it from inside a
     // TimelineView(.animation) that already redraws every frame, so marking
@@ -54,6 +66,16 @@ final class ChatViewModel: ObservableObject {
         // Periodic ping (every 5s) to keep the connection indicator honest.
         pingTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.refreshConnection() }
+        }
+        // Mirror VoiceSession state changes onto the main actor via an
+        // AsyncStream so we don't have to store a closure that captures
+        // `self` inside the actor (which tripped Swift 6 Sendable checks).
+        Task { [weak self] in
+            guard let self = self else { return }
+            let stream = await self.voice.stateStream()
+            for await newState in stream {
+                self.voiceState = newState
+            }
         }
     }
 
@@ -127,6 +149,54 @@ final class ChatViewModel: ObservableObject {
     func cancelStreaming() {
         streamTask?.cancel()
         streamTask = nil
+        Task { await voice.cancelSpeaking() }
+    }
+
+    // MARK: - Voice pipeline
+
+    /// Start / stop voice capture. While recording, calling this again ends
+    /// capture, transcribes, pushes the text through the normal send flow,
+    /// and speaks the streamed reply aloud.
+    func toggleVoice() {
+        Task { await toggleVoiceAsync() }
+    }
+
+    private func toggleVoiceAsync() async {
+        let state = await voice.state
+        switch state {
+        case .idle, .loadingModel:
+            await voice.cancelSpeaking()
+            do {
+                try await voice.startRecording()
+            } catch {
+                lastError = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+            }
+        case .recording:
+            let audio = await voice.finishRecording()
+            do {
+                let text = try await voice.transcribe(audio)
+                guard !text.isEmpty else { return }
+                input = text
+                speakAssistantReply = true
+                send()
+            } catch {
+                lastError = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+            }
+        case .transcribing, .speaking:
+            // User tapped mic mid-processing. Cancel any TTS immediately so
+            // they can start recording again without overlap.
+            await voice.cancelSpeaking()
+        }
+    }
+
+    /// Pre-load the Whisper model so the first voice interaction is snappy.
+    /// Fire-and-forget; any failure here is deliberately silent so we don't
+    /// spam an offline user at launch — errors resurface the first time
+    /// they actually try to use voice.
+    func warmVoiceModel() {
+        Task { await voice.prewarm() }
     }
 
     // MARK: - Private
@@ -157,6 +227,13 @@ final class ChatViewModel: ObservableObject {
         // node. When the backend supplied logprobs, the node's glow + pulse
         // intensity track the model's confidence for that token.
         graph.ingestAssistantToken(delta.content, confidence: delta.confidence)
+
+        // Speak streaming output sentence-by-sentence when this turn was
+        // initiated by voice.
+        if speakAssistantReply {
+            let chunk = delta.content
+            Task { await voice.speakStreaming(chunk) }
+        }
     }
 
     private func finishStreaming(id: UUID, failed: Bool = false) {
@@ -168,6 +245,11 @@ final class ChatViewModel: ObservableObject {
         }
         isStreaming = false
         graph.finishThinking()
+
+        if speakAssistantReply {
+            speakAssistantReply = false
+            Task { await voice.flushSpeaking() }
+        }
     }
 
     /// Rough token count — good enough for tokens/sec display.

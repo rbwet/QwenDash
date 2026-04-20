@@ -1,16 +1,18 @@
 import SwiftUI
 
-/// Scrolling message list.
+/// Scrolling message list. Apple-native bubble styling: user bubbles filled
+/// with the accent colour (think Messages), assistant bubbles in a neutral
+/// material so the content reads cleanly against the window background.
 struct ChatView: View {
     @ObservedObject var vm: ChatViewModel
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 14) {
+                LazyVStack(spacing: 10) {
                     if vm.messages.isEmpty {
                         emptyState
-                            .padding(.top, 40)
+                            .padding(.top, 48)
                     }
                     ForEach(vm.messages) { msg in
                         MessageBubble(message: msg)
@@ -26,10 +28,10 @@ struct ChatView: View {
                             .transition(.opacity)
                     }
 
-                    Color.clear.frame(height: 8).id("BOTTOM")
+                    Color.clear.frame(height: 4).id("BOTTOM")
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
             .onChange(of: vm.messages.last?.content) { _, _ in
                 withAnimation(.easeOut(duration: 0.15)) {
@@ -45,74 +47,62 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "waveform.path")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Theme.neonCyan, Theme.neonMagenta],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .shadow(color: Theme.neonCyan.opacity(0.5), radius: 12)
-            Text("AWAITING INPUT")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .tracking(4)
-                .foregroundStyle(Theme.textSecondary)
-            Text("ask the model anything. watch it think.")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Theme.textMuted)
+        VStack(spacing: 8) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text("No messages yet")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("Ask the model anything. Watch it think.")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
         }
     }
 }
+
+// MARK: - Bubble
 
 private struct MessageBubble: View {
     let message: ChatMessage
 
     var isUser: Bool { message.role == .user }
 
-    var tint: Color {
-        isUser ? Theme.neonCyan : Theme.neonMagenta
-    }
-
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             if isUser { Spacer(minLength: 60) }
-
             if !isUser { avatar }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(isUser ? "YOU" : "QWEN")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .tracking(2)
-                        .foregroundStyle(tint.opacity(0.8))
+                    Text(isUser ? "You" : "Qwen")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isUser ? Color.white.opacity(0.85) : .secondary)
                     if message.isStreaming {
                         StreamingDots()
                     }
                 }
                 Text(message.content + (message.isStreaming ? "▍" : ""))
-                    .font(.system(size: 13, design: .default))
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(isUser ? Color.white : Color.primary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
             .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(tint.opacity(0.06))
-                    }
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isUser
+                          ? AnyShapeStyle(Theme.accent)
+                          : AnyShapeStyle(.regularMaterial))
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(tint.opacity(0.35), lineWidth: 0.7)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        isUser ? Color.clear : Theme.hairline,
+                        lineWidth: 0.5
+                    )
             }
-            .shadow(color: tint.opacity(0.15), radius: 10, x: 0, y: 4)
 
             if isUser { avatar }
             if !isUser { Spacer(minLength: 60) }
@@ -121,29 +111,29 @@ private struct MessageBubble: View {
 
     private var avatar: some View {
         ZStack {
-            Circle().fill(tint.opacity(0.15))
-            Circle().strokeBorder(tint.opacity(0.7), lineWidth: 0.7)
-            Image(systemName: isUser ? "person.fill" : "bolt.fill")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(tint)
+            Circle()
+                .fill(isUser ? Theme.accent.opacity(0.18) : Color.white.opacity(0.08))
+            Image(systemName: isUser ? "person.fill" : "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isUser ? Theme.accent : .secondary)
         }
-        .frame(width: 26, height: 26)
-        .shadow(color: tint.opacity(0.6), radius: 6)
+        .frame(width: 22, height: 22)
     }
 }
+
+// MARK: - Streaming indicator
 
 private struct StreamingDots: View {
     @State private var phase: Double = 0
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 2) {
             ForEach(0..<3) { i in
                 Circle()
-                    .fill(Theme.neonMagenta)
-                    .frame(width: 4, height: 4)
+                    .fill(Color.secondary)
+                    .frame(width: 3, height: 3)
                     .opacity(dotAlpha(i))
             }
         }
-        .shadow(color: Theme.neonMagenta.opacity(0.7), radius: 4)
         .onAppear {
             withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
                 phase = 1
@@ -156,25 +146,28 @@ private struct StreamingDots: View {
     }
 }
 
+// MARK: - Error row
+
 private struct ErrorRow: View {
     let text: String
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Theme.neonAmber)
+                .foregroundStyle(Theme.signalWarn)
+                .font(.system(size: 12))
             Text(text)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Theme.neonAmber.opacity(0.85))
+                .font(.system(size: 12))
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Theme.neonAmber.opacity(0.08))
+                .fill(Theme.signalWarn.opacity(0.12))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Theme.neonAmber.opacity(0.5), lineWidth: 0.6)
+                .strokeBorder(Theme.signalWarn.opacity(0.35), lineWidth: 0.5)
         }
     }
 }

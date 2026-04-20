@@ -1,94 +1,108 @@
 import SwiftUI
 
-/// Top status bar: connection dot, model id, tokens/sec, latency.
+/// Top toolbar: app identity on the left, data readouts on the right.
+/// All text is SF Pro; only the data values use monospaced digits so their
+/// widths don't jitter as they update.
 struct StatsBar: View {
     @ObservedObject var vm: ChatViewModel
 
     var body: some View {
-        HStack(spacing: 18) {
-            // Title / brand
-            HStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(Theme.neonMagenta.opacity(0.25))
-                        .frame(width: 22, height: 22)
-                        .blur(radius: 6)
-                    Image(systemName: "cpu.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Theme.neonCyan, Theme.neonMagenta],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                Text("QWENDASH")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .tracking(3)
-                    .foregroundStyle(Theme.textPrimary)
-                Text("/ NEURAL INTERFACE")
-                    .font(Theme.monoLabel)
-                    .tracking(1.5)
-                    .foregroundStyle(Theme.textMuted)
-            }
-
+        HStack(spacing: 22) {
+            identity
             Spacer()
 
-            stat(label: "STATUS", value: vm.connected ? "ONLINE" : "OFFLINE",
-                 color: vm.connected ? Theme.neonGreen : Theme.neonAmber,
-                 showDot: true)
+            stat(label: "Status",
+                 value: vm.connected ? "Online" : "Offline",
+                 dotColor: vm.connected ? Theme.signalOK : Theme.signalWarn)
 
-            stat(label: "MODEL", value: truncated(vm.modelId, 32),
-                 color: Theme.neonCyan)
+            stat(label: "Model",
+                 value: truncated(vm.modelId, 28),
+                 mono: true)
 
-            stat(label: "LATENCY",
-                 value: vm.latencyMS.map { "\($0)MS" } ?? "—",
-                 color: Theme.neonViolet)
+            stat(label: "Latency",
+                 value: vm.latencyMS.map { "\($0) ms" } ?? "—",
+                 mono: true)
 
-            stat(label: "TOK/S",
+            stat(label: "Tokens/s",
                  value: vm.isStreaming ? String(format: "%.1f", vm.tokensPerSecond) : "—",
-                 color: Theme.neonMagenta)
+                 mono: true)
 
-            stat(label: "CONF",
+            stat(label: "Confidence",
                  value: vm.avgConfidence.map { String(format: "%.0f%%", $0 * 100) } ?? "—",
-                 color: confidenceColor(vm.avgConfidence))
+                 mono: true,
+                 dotColor: vm.avgConfidence.map(confidenceColor))
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.6)
+        }
     }
 
+    // MARK: - Identity
+
     @ViewBuilder
-    private func stat(label: String, value: String, color: Color, showDot: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(Theme.monoLabel)
-                .tracking(1.4)
-                .foregroundStyle(Theme.textMuted)
-            HStack(spacing: 6) {
-                if showDot {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 6, height: 6)
-                        .shadow(color: color, radius: 4)
-                }
-                Text(value)
-                    .font(Theme.monoBody)
-                    .foregroundStyle(color)
+    private var identity: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Theme.accent.opacity(0.16))
+                    .frame(width: 22, height: 22)
+                Image(systemName: "waveform")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text("QwenDash")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Local LLM Interface")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
         }
     }
+
+    // MARK: - Stat block
+
+    @ViewBuilder
+    private func stat(
+        label: String,
+        value: String,
+        mono: Bool = false,
+        dotColor: Color? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                if let dot = dotColor {
+                    Circle()
+                        .fill(dot)
+                        .frame(width: 6, height: 6)
+                }
+                Text(value)
+                    .font(
+                        mono
+                            ? .system(size: 12, weight: .medium, design: .monospaced)
+                            : .system(size: 12, weight: .medium)
+                    )
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     private func truncated(_ s: String, _ n: Int) -> String {
         s.count <= n ? s : "…" + s.suffix(n - 1)
     }
 
-    /// Green-ish when the model is speaking confidently, amber when it's
-    /// hedging between candidates. Muted grey when we have no signal yet.
-    private func confidenceColor(_ p: Double?) -> Color {
-        guard let p = p else { return Theme.textMuted }
-        if p >= 0.6 { return Theme.neonGreen }
-        if p >= 0.3 { return Theme.neonCyan }
-        return Theme.neonAmber
+    /// Grade the confidence dot from warn → ok as the model becomes more
+    /// decisive. Only two stops to keep it readable.
+    private func confidenceColor(_ p: Double) -> Color {
+        p >= 0.5 ? Theme.signalOK : Theme.signalWarn
     }
 }

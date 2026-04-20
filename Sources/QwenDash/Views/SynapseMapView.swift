@@ -28,30 +28,14 @@ struct SynapseMapView: View {
             }
         }
         .background(
-            // Deep space gradient sits behind the canvas for that nightside-LA feel.
-            ZStack {
-                RadialGradient(
-                    colors: [
-                        Theme.neonViolet.opacity(0.16),
-                        Theme.background.opacity(0.0)
-                    ],
-                    center: .center, startRadius: 40, endRadius: 480
-                )
-                RadialGradient(
-                    colors: [
-                        Theme.neonCyan.opacity(0.10),
-                        Color.clear
-                    ],
-                    center: UnitPoint(x: 0.1, y: 0.85), startRadius: 20, endRadius: 320
-                )
-                RadialGradient(
-                    colors: [
-                        Theme.neonMagenta.opacity(0.10),
-                        Color.clear
-                    ],
-                    center: UnitPoint(x: 0.92, y: 0.15), startRadius: 20, endRadius: 320
-                )
-            }
+            // Very subtle central glow for depth — no competing colour washes.
+            RadialGradient(
+                colors: [
+                    Theme.mapHidden.opacity(0.07),
+                    Color.clear
+                ],
+                center: .center, startRadius: 40, endRadius: 420
+            )
         )
     }
 
@@ -74,31 +58,25 @@ struct SynapseMapView: View {
         }
         ctx.stroke(gridPath, with: .color(Color.white.opacity(0.025)), lineWidth: 0.5)
 
-        // Slow horizontal scanline.
-        let scan = (sin(time * 0.4) + 1) * 0.5 // 0...1
-        let scanY = CGFloat(scan) * size.height
-        let scanRect = CGRect(x: 0, y: scanY - 1, width: size.width, height: 2)
-        ctx.fill(Path(scanRect), with: .linearGradient(
-            Gradient(colors: [
-                Color.clear,
-                Theme.neonCyan.opacity(0.18),
-                Color.clear
-            ]),
-            startPoint: .zero,
-            endPoint: CGPoint(x: size.width, y: 0)
-        ))
+        // Scanline removed — the drifting highlight read as retro-gamer rather
+        // than native. The grid plus the pulses carry enough motion.
+        _ = time
     }
 
     private func drawColumnLabels(ctx: GraphicsContext, size: CGSize) {
-        let inText = Text("◀ INPUT TOKENS")
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            .foregroundColor(Theme.neonCyan.opacity(0.6))
-        let hiText = Text("◆ HIDDEN ACTIVATION")
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            .foregroundColor(Theme.neonViolet.opacity(0.6))
-        let outText = Text("OUTPUT STREAM ▶")
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            .foregroundColor(Theme.neonMagenta.opacity(0.6))
+        let style = Color.secondary
+        let inText = Text("INPUT")
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.8)
+            .foregroundColor(style)
+        let hiText = Text("HIDDEN")
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.8)
+            .foregroundColor(style)
+        let outText = Text("OUTPUT")
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.8)
+            .foregroundColor(style)
 
         ctx.draw(inText,  at: CGPoint(x: size.width * 0.08, y: 14), anchor: .center)
         ctx.draw(hiText,  at: CGPoint(x: size.width * 0.50, y: 14), anchor: .center)

@@ -3,6 +3,7 @@ import SwiftUI
 /// The full dashboard. Top: stats. Middle: synapse map. Bottom: chat + input.
 struct ContentView: View {
     @StateObject private var vm = ChatViewModel()
+    @EnvironmentObject private var hotkeyBridge: HotkeyBridge
 
     var body: some View {
         ZStack {
@@ -69,6 +70,13 @@ struct ContentView: View {
                 .padding(.bottom, 18)
             }
         }
+        .onAppear {
+            // ContentView's StateObject owns vm for the app's lifetime, so a
+            // strong capture here is safe.
+            let vm = self.vm
+            hotkeyBridge.onTrigger = { vm.toggleVoice() }
+            vm.warmVoiceModel()
+        }
     }
 }
 
@@ -88,7 +96,12 @@ private struct CyberBackground: View {
     }
 }
 
+// #Preview is Xcode-only; the PreviewsMacros plugin isn't available from
+// `swift build` at the command line. Re-enable from Xcode when you need
+// an interactive preview.
+#if XCODE_PREVIEW
 #Preview {
     ContentView()
         .frame(width: 1280, height: 880)
 }
+#endif

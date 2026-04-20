@@ -1,8 +1,6 @@
 # QwenDash
 
-A native macOS dashboard for chatting with a local Qwen model, with a live "synapse map" that pretends to show your query firing through the network while the model thinks.
-
-It's a little over-the-top. That's the point.
+A native macOS dashboard for talking to a local Qwen model, with a live synapse map that visualises what the model is actually doing as it generates each token.
 
 <p align="center">
   <img src="docs/screenshot.png" alt="QwenDash screenshot" width="900">
@@ -10,18 +8,16 @@ It's a little over-the-top. That's the point.
 
 ## Why this exists
 
-I wanted a nicer face on top of LM Studio than a browser tab. So I built one.
+I wanted a nicer face on top of LM Studio than a browser tab, and I wanted the chrome to feel like a real piece of Apple software rather than a web app stuffed into a window. So I built one.
 
-QwenDash is pure SwiftUI, talks to LM Studio's OpenAI-compatible endpoint over streaming SSE, and renders a vaguely-plausible animated graph of nodes and pulses whenever you send a message. It doesn't peek inside the model — the animation is a theatrical stand-in, not a real activation trace. But it feels alive, and that turns out to matter more than you'd think when you're staring at a chat window for hours.
+QwenDash is pure SwiftUI. It talks to LM Studio's OpenAI-compatible endpoint over streaming SSE, renders the conversation in a restrained native shell, and plots every generated token on a live graph whose intensity is driven by the model's own output.
 
 ## What you get
 
-- **Native SwiftUI app.** No Electron, no browser, no 300MB of Chromium. Launches instantly.
-- **Synapse map.** Your query tokens appear as cyan nodes on the left and fire pulses into a drifting cluster of "hidden" nodes in the middle. As the model streams back, magenta nodes pop in on the right, each one trailing a pulse from the cluster. Edges glow, things cross-chatter, the cluster looks busy.
-- **Real token confidence.** QwenDash asks LM Studio for per-token `logprobs` and maps the resulting probability straight onto each output node's glow. Tokens the model picked decisively come in bright; tokens it hedged on come in dim. The top bar shows a rolling `CONF` percentage averaged across the generation.
+- **Native SwiftUI app.** System materials, SF Pro typography, a single accent colour, and the kind of corner radii and hairline borders you'd expect from an app shipped by Apple. No Electron, no browser, no 300MB of Chromium.
+- **Synapse map — driven by real model output.** Your query tokens appear as nodes on the left. A cluster of hidden nodes sits in the middle, cross-chattering while the model thinks. As the response streams back, each generated token becomes a node on the right, and its brightness is scaled by the probability the model assigned to that token. A confident `"the"` comes in bright; a hedged token where the top-5 candidates all hover around 20% comes in noticeably dimmer. This isn't decorative — the intensity values come straight from `logprobs` data returned by the server.
 - **Streaming chat.** Token-by-token output with a proper stop button. Cancel mid-thought, clear the conversation, start over.
-- **Live stats bar.** Connection state, model id, request latency, tokens/sec, average token confidence.
-- **Cyberpunk-glass look.** Dark backdrop, radial neon glows, ultra-thin material panels, monospaced labels. Not subtle.
+- **Live stats bar.** Connection state, loaded model, request latency, tokens/sec, rolling average confidence.
 
 ## Requirements
 
@@ -29,7 +25,7 @@ QwenDash is pure SwiftUI, talks to LM Studio's OpenAI-compatible endpoint over s
 - Xcode 15 or newer
 - [LM Studio](https://lmstudio.ai) running a Qwen model locally
 
-I developed this against `mlx-community/Qwen3-*` variants but anything LM Studio exposes via its OpenAI-compatible server will work — the model id is auto-detected.
+Developed against `mlx-community/Qwen3-*` variants but anything LM Studio exposes via its OpenAI-compatible server should work — the model ID is auto-detected.
 
 ## Getting started
 
@@ -67,25 +63,43 @@ Either way, the window comes up, auto-connects to LM Studio, and you can start t
 
 ## Using it
 
-- Type in the glass input at the bottom.
-- **⌘⏎** to send. Plain `⏎` adds a newline.
-- While the model is streaming, the send button flips amber with a stop icon — tap it to abort the request.
-- **Clear** (top-right of the conversation panel) wipes the chat and resets the graph.
-- That's basically it. There's no settings screen, no accounts, no telemetry. It's a toy.
+- Type in the field at the bottom.
+- **⌘⏎** to send. Plain `⏎` inserts a newline.
+- While the model is streaming, the send button flips to a stop icon — click it to abort.
+- **Clear** in the top-right of the conversation panel wipes the chat and resets the graph.
+- That's basically it. No settings screen, no accounts, no telemetry.
 
-## Tuning the vibe
+## On the synapse map — what's real and what's next
 
-All the knobs live in a handful of files. If you want to reskin it or change behaviour, start here:
+The map is **driven by real data from the model**, not purely decorative. Specifically:
 
-| File | What's in it |
-| --- | --- |
-| `Sources/QwenDash/Theme.swift` | Palette, neon accents, fonts, glass panels, panel labels |
-| `Sources/QwenDash/Models/SynapseGraph.swift` | Hidden cluster size, edge density, pulse speed/intensity, output column cap |
-| `Sources/QwenDash/Views/SynapseMapView.swift` | Node/edge/pulse rendering, background grid, scanline, curve shape |
-| `Sources/QwenDash/Models/LMStudioClient.swift` | `baseURL`, temperature, max tokens — change the URL if LM Studio runs on a different port |
-| `Sources/QwenDash/ContentView.swift` | Overall layout, backdrop gradients |
+- Every output node's glow and the intensity of its incoming pulse are scaled by the token's probability, parsed from OpenAI-compatible `logprobs` data in each streaming chunk. A probability of 0.95 renders at full brightness; a probability of 0.05 renders dim but visible.
+- The confidence percentage in the top bar is the rolling mean of those same probabilities across the current generation.
+- Input nodes are derived directly from tokenising your query.
 
-## File layout
+The parts that are still stylised:
+
+- The exact positions of the hidden-cluster nodes and the cross-chatter between them. The cluster's *activity level* responds to real streaming events (each new token kicks a few pulses), but the geometry is a visual metaphor, not a literal projection of any layer's state.
+- The specific hidden node that pulses fire from. That's a random pick — the backend doesn't tell us which layer or head was "responsible" for a token, and LM Studio's HTTP API doesn't expose attention weights or expert routing.
+
+**What's next.** The synapse layer is the part I'm least done with. On the roadmap:
+
+- **MoE expert routing.** For Qwen MoE variants, pull the chosen expert IDs per token and drive the hidden cluster with real routing data. That requires running inference directly via MLX Swift instead of going through LM Studio, which is a meaningful project on its own — but when it lands, the map becomes a genuine "which subnetworks fired" display.
+- **Attention-proxy visualisation.** Even without ditching LM Studio, the top-*k* alternative tokens at each step (`top_logprobs`) give a real signal about where the model considered branching. Plan is to render ghost alternative-token nodes with opacity scaled by their probability, branching off each output node.
+- **Per-token latency colouring.** Colour output nodes by time-to-generate, so slow tokens stand out visually.
+
+None of this is required to use QwenDash today — the current behaviour is complete and honest — but it's where the project is heading.
+
+## What else I want to build
+
+QwenDash is the first piece of a slightly larger idea: a small set of native macOS tools that sit next to what you're already working in, powered by a local model. Two concrete next steps:
+
+- **IDE companion.** A sidebar / floating panel that pairs with Xcode or VS Code, so you can highlight code and ask the local model about it, request rewrites, or run the synapse view against real coding prompts without leaving your editor.
+- **Terminal integration.** A thin shim for iTerm2 / Terminal.app that lets you pipe a selection into QwenDash, get a streaming answer back in the same synapse view, and optionally paste the reply back at the cursor. Useful for shell one-liners, git log explanations, or explaining a stack trace.
+
+Both would share the same streaming + logprob pipeline that's already in this repo, so the synapse map comes along for free.
+
+## Source layout
 
 ```
 QwenDash/
@@ -93,48 +107,47 @@ QwenDash/
 ├── README.md
 └── Sources/QwenDash/
     ├── QwenDashApp.swift         # @main entry, window + activation policy
-    ├── ContentView.swift         # dashboard layout + cyber backdrop
-    ├── Theme.swift               # palette, fonts, GlassPanel, PanelLabel
+    ├── ContentView.swift         # overall layout + window backdrop
+    ├── Theme.swift               # palette, typography, GlassPanel, PanelLabel
     ├── Models/
     │   ├── ChatMessage.swift
     │   ├── ChatViewModel.swift   # streaming, stats, graph orchestration
-    │   ├── LMStudioClient.swift  # OpenAI-compatible SSE streaming
+    │   ├── LMStudioClient.swift  # OpenAI-compatible SSE + logprob parsing
     │   └── SynapseGraph.swift    # nodes, edges, pulses, tick()
     └── Views/
-        ├── StatsBar.swift        # top status row
+        ├── StatsBar.swift        # top toolbar: identity + data readouts
         ├── SynapseMapView.swift  # Canvas + TimelineView neural map
         ├── ChatView.swift        # message bubbles, streaming cursor
-        └── InputBar.swift        # glass text input + send button
+        └── InputBar.swift        # text field + send button
 ```
+
+## Tuning
+
+| File | What's in it |
+| --- | --- |
+| `Theme.swift` | Accent colour, map palette, signal colours, typography, panel style |
+| `Models/SynapseGraph.swift` | Hidden cluster size, edge density, pulse speed, output column cap |
+| `Views/SynapseMapView.swift` | Node/edge/pulse rendering, grid, curve shape |
+| `Models/LMStudioClient.swift` | `baseURL`, temperature, max tokens, whether to request logprobs |
+| `ContentView.swift` | Overall layout, window backdrop |
 
 ## Troubleshooting
 
 **"Can't reach LM Studio at `localhost:1234`."**
 Make sure the server is toggled on in the Developer tab and that a model is actually loaded. A loaded-but-not-served model will not respond.
 
-**The synapse map just sits there.**
+**The map just sits there.**
 It's supposed to. The graph only animates when there's activity — send a message and it'll come alive.
 
+**Confidence stays at `—` during generation.**
+The backend isn't returning `logprobs`. Most LM Studio builds support it out of the box; if yours doesn't, set `Config.requestLogprobs = false` in `LMStudioClient.swift` to quiet the stat. Everything else will still work.
+
 **The app launches but I can't type in the input.**
-SwiftPM executables can boot as background processes that never become the key window, which quietly swallows every keystroke. The app's `AppDelegate` already forces `.regular` activation policy and makes the window key on launch, so this shouldn't happen — but if you ever rip the delegate out, that's the bug you'll hit.
+SwiftPM executables can boot as background processes that never become the key window, which quietly swallows every keystroke. The `AppDelegate` already forces `.regular` activation policy on launch, so this shouldn't happen — but if you ever rip the delegate out, that's the bug you'll hit.
 
-**I want a proper `.app` with a Dock icon and an app bundle.**
-Create a fresh Xcode "macOS App" project and drop everything under `Sources/QwenDash/` into it. The source is self-contained, no external dependencies.
-
-## A note on the "synapse map"
-
-It's **not** a real activation trace. I'm not hooking into Qwen's internals to sample attention weights or hidden states — those aren't exposed by LM Studio's HTTP API.
-
-What *is* real: the per-token confidence signal. When you send a query, QwenDash asks the server for `logprobs` along with each token. Every time a new output node lights up, its glow and incoming pulse intensity are scaled by the probability the model assigned to that token. A confident "the" comes in at full brightness; a hedged token where the top-5 candidates are all around 20% comes in noticeably dimmer.
-
-The hidden-cluster chatter and the positions of the nodes are still stylised — those are decorative. But the intensity of the output column is driven by an actual value the model produced. The `CONF` number in the top bar is the rolling average of those probabilities across the current generation.
-
-If someone wants to go further — expert-routing for MoE models, or actual hidden-state telemetry from an MLX inference loop — the graph API in `SynapseGraph.swift` is small and approachable: `ingestUserQuery`, `ingestAssistantToken(_:confidence:)`, and a `tick(dt:)` pump. PRs welcome.
+**I want a proper `.app` with a Dock icon and a full bundle.**
+Create a new Xcode "macOS App" project and drop everything under `Sources/QwenDash/` into it. The source is self-contained, no external dependencies.
 
 ## License
 
 MIT. Do whatever you want with it.
-
----
-
-Built in a weekend because LM Studio's UI is fine but I wanted something that felt like a piece of kit from a cyberpunk desk.

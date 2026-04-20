@@ -49,7 +49,7 @@ If you see your model in the JSON, you're good.
 Easiest path is through Xcode:
 
 ```bash
-git clone https://github.com/<your-handle>/QwenDash.git
+git clone https://github.com/rbwet/QwenDash.git
 cd QwenDash
 open Package.swift
 ```

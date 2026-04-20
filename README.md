@@ -18,7 +18,7 @@ QwenDash is pure SwiftUI. It talks to LM Studio's OpenAI-compatible endpoint ove
 - **Synapse map — driven by real model output.** Your query tokens appear as nodes on the left. A cluster of hidden nodes sits in the middle, cross-chattering while the model thinks. As the response streams back, each generated token becomes a node on the right, and its brightness is scaled by the probability the model assigned to that token. A confident `"the"` comes in bright; a hedged token where the top-5 candidates all hover around 20% comes in noticeably dimmer. This isn't decorative — the intensity values come straight from `logprobs` data returned by the server.
 - **Streaming chat.** Token-by-token output with a proper stop button. Cancel mid-thought, clear the conversation, start over.
 - **Live stats bar.** Connection state, loaded model, request latency, tokens/sec, rolling average confidence.
-- **Push-to-talk voice, fully on-device.** Tap the mic (or hit ⌥-Space from anywhere on the system) to dictate a question, and the model streams its answer back as speech. Speech-to-text runs locally via WhisperKit; the reply is spoken with a macOS Premium / Enhanced voice, sentence-by-sentence as tokens arrive. Everything after the first-run model download works offline.
+- **Push-to-talk voice, fully on-device.** Tap the mic (or hit ⌥-Space from anywhere on the system) to dictate a question, and the model streams its answer back as speech. Speech-to-text runs locally via WhisperKit; the reply is spoken with a macOS Premium / Enhanced voice, sentence-by-sentence as tokens arrive. **The app itself never makes a network call** — a one-time setup script installs the Whisper model to `~/Library/Application Support/QwenDash/Models/`, and from then on voice is fully offline.
 
 ## Requirements
 
@@ -62,6 +62,22 @@ swift run QwenDash
 
 Either way, the window comes up, auto-connects to LM Studio, and you can start typing.
 
+### 3. (Optional) Install the Whisper model for voice
+
+QwenDash never reaches out to the internet itself. If you want voice input, run the fetch script once — ideally on a machine that has internet, though the model files can also be copied in from any other source:
+
+```bash
+python3 scripts/fetch-whisper.py
+```
+
+That installs `openai_whisper-tiny.en` (~40 MB) plus its tokenizer into `~/Library/Application Support/QwenDash/Models/`. After the script finishes, the app loads Whisper strictly from disk (`download: false`) and voice works completely offline forever.
+
+Want a larger/more accurate model? Re-run with `WHISPER_VARIANT` set and update `modelVariant` / `tokenizerRepo` in `VoiceSession.swift` to match:
+
+```bash
+WHISPER_VARIANT=openai_whisper-base.en python3 scripts/fetch-whisper.py
+```
+
 ## Using it
 
 - Type in the field at the bottom.
@@ -72,7 +88,7 @@ Either way, the window comes up, auto-connects to LM Studio, and you can start t
 - **Clear** in the top-right of the conversation panel wipes the chat and resets the graph.
 - That's basically it. No settings screen, no accounts, no telemetry.
 
-The first time you use voice, WhisperKit will download a small Whisper model (~150 MB for `base`) from HuggingFace into `~/Documents/huggingface/...`. Subsequent launches use the cached model and work completely offline.
+Voice requires the one-time setup in **step 3** above. The app itself never makes network requests — if you skip the setup, the mic button will show a clear error pointing back at the fetch script.
 
 ## On the synapse map — what's real and what's next
 
@@ -110,6 +126,8 @@ Both would share the same streaming + logprob pipeline that's already in this re
 QwenDash/
 ├── Package.swift
 ├── README.md
+├── scripts/
+│   └── fetch-whisper.py         # one-time model install, run with internet
 └── Sources/QwenDash/
     ├── QwenDashApp.swift         # @main entry, window + activation policy
     ├── ContentView.swift         # overall layout + window backdrop
@@ -149,8 +167,11 @@ It's supposed to. The graph only animates when there's activity — send a messa
 **Confidence stays at `—` during generation.**
 The backend isn't returning `logprobs`. Most LM Studio builds support it out of the box; if yours doesn't, set `Config.requestLogprobs = false` in `LMStudioClient.swift` to quiet the stat. Everything else will still work.
 
-**The mic button does nothing / I never got a microphone prompt.**
-First tap triggers the Whisper model download, which is silent until it completes (check `~/Documents/huggingface/` for activity). macOS will also prompt for microphone access the first time; deny it once and the prompt won't reappear — go to System Settings → Privacy & Security → Microphone and flip QwenDash (or your terminal, if you launched via `swift run`) back on.
+**The mic button shows "Whisper model not found…"**
+Run `python3 scripts/fetch-whisper.py` once. The app refuses to download the model itself by design.
+
+**I never got a microphone prompt.**
+macOS prompts on the first actual recording attempt. Deny it once and the prompt won't reappear — go to System Settings → Privacy & Security → Microphone and flip QwenDash (or your terminal, if you launched via `swift run`) back on.
 
 **⌥-Space doesn't trigger dictation.**
 The hotkey is a Carbon `RegisterEventHotKey`, not an accessibility monitor, so it shouldn't collide with permission prompts. If something else on your machine has already claimed ⌥-Space (e.g. Spotlight, Alfred, Raycast), that app wins — change the modifier set in `VoiceHotkey.swift`.

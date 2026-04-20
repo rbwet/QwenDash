@@ -27,15 +27,23 @@ actor VoiceSession {
         case noAudio
         case whisperNotReady
         case micDenied
-        case modelDownloadFailed(String)
+        case modelNotInstalled(String)
+        case modelLoadFailed(String)
 
         var errorDescription: String? {
             switch self {
-            case .engineFailed(let m):         return "Audio engine failed: \(m)"
-            case .noAudio:                     return "No audio captured."
-            case .whisperNotReady:             return "Speech model isn't loaded yet."
-            case .micDenied:                   return "Microphone access was denied. Enable it in System Settings → Privacy & Security → Microphone."
-            case .modelDownloadFailed(let m):  return "Couldn't download the Whisper model. First-run needs internet access. (\(m))"
+            case .engineFailed(let m):
+                return "Audio engine failed: \(m)"
+            case .noAudio:
+                return "No audio captured."
+            case .whisperNotReady:
+                return "Speech model isn't loaded yet."
+            case .micDenied:
+                return "Microphone access was denied. Enable it in System Settings → Privacy & Security → Microphone."
+            case .modelNotInstalled(let path):
+                return "Whisper model not found at \(path). Run `python3 scripts/fetch-whisper.py` once to install it. QwenDash never reaches the network on its own."
+            case .modelLoadFailed(let m):
+                return "Couldn't load the Whisper model from disk: \(m)"
             }
         }
     }
@@ -62,9 +70,12 @@ actor VoiceSession {
     // MARK: - Model
 
     private var whisperKit: WhisperKit?
-    /// Smaller models transcribe faster but are less accurate. `"base"` is
-    /// the sweet spot for short dictation on Apple Silicon.
-    private let modelVariant = "base"
+    /// Matches the default in `scripts/fetch-whisper.py`. English-only,
+    /// ~40 MB, good enough for short dictation. To use a bigger model,
+    /// re-run the fetch script with `WHISPER_VARIANT=openai_whisper-base.en`
+    /// and update this constant to match.
+    private let modelVariant = "openai_whisper-tiny.en"
+    private let tokenizerRepo = "openai/whisper-tiny.en"
 
     // MARK: - TTS
 
@@ -92,19 +103,63 @@ actor VoiceSession {
 
     // MARK: - Model loading
 
-    /// Pre-warm the Whisper model. Safe to call multiple times; first call
-    /// downloads and loads, subsequent calls are no-ops. Throws if the
-    /// download fails (typically because the first run is offline).
+    /// Application Support location where `scripts/fetch-whisper.py`
+    /// drops the model files. We intentionally use Application Support
+    /// rather than `~/Documents/huggingface/...` so QwenDash's model
+    /// install is self-contained and doesn't collide with other
+    /// WhisperKit-based apps on the same machine.
+    private static func supportRoot() -> URL? {
+        try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        .appendingPathComponent("QwenDash", isDirectory: true)
+        .appendingPathComponent("Models", isDirectory: true)
+    }
+
+    private func modelFolderURL() -> URL? {
+        Self.supportRoot()?.appendingPathComponent(modelVariant, isDirectory: true)
+    }
+
+    private func tokenizerFolderURL() -> URL? {
+        Self.supportRoot()?
+            .appendingPathComponent("tokenizer", isDirectory: true)
+            .appendingPathComponent(tokenizerRepo, isDirectory: true)
+    }
+
+    /// Pre-warm the Whisper model. Safe to call multiple times. We load
+    /// strictly from disk with `download: false`, so the app will never
+    /// initiate a network request — if the model isn't on disk you'll
+    /// get a `modelNotInstalled` error pointing at the fetch script.
     func prepare() async throws {
         guard whisperKit == nil else { return }
+
+        guard let modelFolder = modelFolderURL(),
+              let tokenizerFolder = tokenizerFolderURL() else {
+            throw VoiceError.modelNotInstalled("<Application Support unavailable>")
+        }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: modelFolder.path) else {
+            throw VoiceError.modelNotInstalled(modelFolder.path)
+        }
+
         state = .loadingModel
         do {
-            let config = WhisperKitConfig(model: modelVariant, verbose: false)
+            let config = WhisperKitConfig(
+                model: modelVariant,
+                modelFolder: modelFolder.path,
+                tokenizerFolder: tokenizerFolder,
+                verbose: false,
+                logLevel: .error,
+                download: false
+            )
             whisperKit = try await WhisperKit(config)
             state = .idle
         } catch {
             state = .idle
-            throw VoiceError.modelDownloadFailed(error.localizedDescription)
+            throw VoiceError.modelLoadFailed(error.localizedDescription)
         }
     }
 

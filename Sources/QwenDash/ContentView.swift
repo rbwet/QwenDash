@@ -73,39 +73,83 @@ struct ContentView: View {
     }
 }
 
-/// Deep nightside background — radial gradient + faint vignette + drifting noise.
+/// Deep nightside backdrop — three coloured blobs drift slowly under a
+/// vignette, so the glass panels pick up a living, refracting world behind
+/// them instead of a static wash. The blobs are heavily blurred radial
+/// gradients; their positions are sine-driven so they breathe rather than
+/// loop.
 private struct CyberBackground: View {
     var body: some View {
-        ZStack {
-            Theme.backgroundDeep
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            ZStack {
+                Theme.backgroundDeep
 
-            // Hot violet glow upper-right
-            RadialGradient(
-                colors: [Theme.neonViolet.opacity(0.30), Color.clear],
-                center: UnitPoint(x: 0.85, y: 0.05),
-                startRadius: 50, endRadius: 700
-            )
+                // Violet blob — orbits upper-right area.
+                blob(
+                    color: Theme.neonViolet,
+                    opacity: 0.38,
+                    center: UnitPoint(
+                        x: 0.80 + 0.08 * sin(t * 0.07),
+                        y: 0.12 + 0.06 * cos(t * 0.09)
+                    )
+                )
 
-            // Cool cyan glow lower-left
-            RadialGradient(
-                colors: [Theme.neonCyan.opacity(0.18), Color.clear],
-                center: UnitPoint(x: 0.10, y: 0.95),
-                startRadius: 40, endRadius: 650
-            )
+                // Cyan blob — drifts across the lower-left quadrant.
+                blob(
+                    color: Theme.neonCyan,
+                    opacity: 0.22,
+                    center: UnitPoint(
+                        x: 0.12 + 0.07 * cos(t * 0.05),
+                        y: 0.90 + 0.05 * sin(t * 0.06)
+                    )
+                )
 
-            // Magenta wash
-            RadialGradient(
-                colors: [Theme.neonMagenta.opacity(0.10), Color.clear],
-                center: UnitPoint(x: 0.5, y: 0.5),
-                startRadius: 100, endRadius: 800
-            )
+                // Magenta core — slowly orbits the centre.
+                blob(
+                    color: Theme.neonMagenta,
+                    opacity: 0.14,
+                    center: UnitPoint(
+                        x: 0.50 + 0.12 * cos(t * 0.04),
+                        y: 0.50 + 0.10 * sin(t * 0.045)
+                    )
+                )
 
-            // Vignette
-            RadialGradient(
-                colors: [Color.clear, Color.black.opacity(0.55)],
-                center: .center, startRadius: 250, endRadius: 950
-            )
+                // Wandering amber spark — smaller, quicker, low opacity.
+                blob(
+                    color: Theme.neonAmber,
+                    opacity: 0.08,
+                    center: UnitPoint(
+                        x: 0.65 + 0.15 * sin(t * 0.11),
+                        y: 0.75 + 0.10 * cos(t * 0.13)
+                    ),
+                    radius: 420
+                )
+
+                // Vignette — seals the edges and pushes focus to centre.
+                RadialGradient(
+                    colors: [Color.clear, Color.black.opacity(0.65)],
+                    center: .center, startRadius: 260, endRadius: 980
+                )
+            }
         }
+    }
+
+    /// A single soft radial glow. `opacity` is applied to the *inner* stop
+    /// so the blob fades cleanly into the darkness around it.
+    @ViewBuilder
+    private func blob(
+        color: Color,
+        opacity: Double,
+        center: UnitPoint,
+        radius: CGFloat = 720
+    ) -> some View {
+        RadialGradient(
+            colors: [color.opacity(opacity), Color.clear],
+            center: center,
+            startRadius: 40,
+            endRadius: radius
+        )
     }
 }
 
